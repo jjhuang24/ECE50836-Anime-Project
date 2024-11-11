@@ -1,14 +1,43 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 from sklearn.preprocessing import MultiLabelBinarizer, StandardScaler
-from sklearn.cluster import AgglomerativeClustering
-from scipy.cluster.hierarchy import dendrogram, linkage
 import matplotlib.pyplot as plt
 
-anime = pd.read_csv('anime.csv')
+class HierarchicalClustering:
+    def __init__(self, n_clusters):
+        self.n_clusters = n_clusters
+        self.labels_ = None
 
-anime['genre'] = anime['genre'].fillna('Unknown')
-anime['genre'] = anime['genre'].str.split(',')
+    def fit(self, X):
+        n_samples = X.shape[0]
+        self.labels_ = np.arange(n_samples)
+        distances = self._calculate_distances(X)
+        
+        for _ in range(n_samples - self.n_clusters):
+            i, j = np.unravel_index(np.argmin(distances), distances.shape)
+            
+            self.labels_[self.labels_ == self.labels_[j]] = self.labels_[i]
+            
+            distances[i] = np.minimum(distances[i], distances[j])
+            distances[:, i] = distances[i]
+            distances[j, :] = np.inf
+            distances[:, j] = np.inf
+            distances[i, i] = np.inf
+        
+        unique_labels = np.unique(self.labels_)
+        for i, label in enumerate(unique_labels):
+            self.labels_[self.labels_ == label] = i
+
+    def _calculate_distances(self, X):
+        n_samples = X.shape[0]
+        distances = np.zeros((n_samples, n_samples))
+        for i in range(n_samples):
+            for j in range(i+1, n_samples):
+                distances[i, j] = distances[j, i] = np.linalg.norm(X[i] - X[j])
+        return distances
+
+anime = pd.read_csv('anime.csv')
+anime['genre'] = anime['genre'].fillna('Unknown').str.split(',')
 
 mlb = MultiLabelBinarizer()
 genre_encoded = pd.DataFrame(mlb.fit_transform(anime['genre']),
@@ -16,14 +45,13 @@ genre_encoded = pd.DataFrame(mlb.fit_transform(anime['genre']),
                              index=anime.index)
 
 features = pd.concat([genre_encoded, anime['rating']], axis=1)
-
 features = features.dropna()
 
 scaler = StandardScaler()
 features_scaled = scaler.fit_transform(features)
 
 n_clusters = 10
-clustering = AgglomerativeClustering(n_clusters=n_clusters)
+clustering = HierarchicalClustering(n_clusters=n_clusters)
 clustering.fit(features_scaled)
 
 anime_clustered = anime.loc[features.index].copy()
@@ -41,10 +69,10 @@ def get_recommendations(anime_title, n=10):
     recommendations = cluster_animes[cluster_animes['name'] != anime_title].sort_values('rating', ascending=False)
     return recommendations.head(n)[['name', 'genre', 'rating']]
 
-input_anime =  input(f"Enter current anime: ")
+input_anime = input("Enter current anime: ")
 recommendations = get_recommendations(input_anime)
 
-print(f"Top 10 recommendations based on {input_anime} using hierarchical clustering:")
+print(f"\nTop 10 recommendations based on {input_anime} using custom hierarchical clustering:")
 for i, (_, row) in enumerate(recommendations.iterrows(), 1):
     print(f"{i}. {row['name']} (Genre: {', '.join(row['genre'])}, Rating: {row['rating']:.2f})")
 
@@ -57,11 +85,12 @@ for cluster in range(n_clusters):
     top_genres = cluster_animes['genre'].explode().value_counts().head()
     for genre, count in top_genres.items():
         print(f"  - {genre}: {count}")
-        
+
 plt.figure(figsize=(10, 7))
-dendrogram(linkage(features_scaled[:100], method='ward')) 
-plt.title('Dendrogram')
-plt.xlabel('Sample Index')
-plt.ylabel('Distance')
-plt.show()
-plt.savefig("Dendogram")
+plt.scatter(features_scaled[:, 0], features_scaled[:, 1], c=clustering.labels_, cmap='viridis')
+plt.title('Hierarchical Clustering Results')
+plt.xlabel('Feature 1')
+plt.ylabel('Feature 2')
+plt.colorbar(label='Cluster')
+plt.savefig("Clustering_Results.png")
+plt.close()
